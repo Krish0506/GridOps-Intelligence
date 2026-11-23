@@ -32,7 +32,7 @@ EXPECTED_TABLES = {
     "ingestion_runs",
 }
 
-EXPECTED_REVISION = "04b9afe7bc6a"
+EXPECTED_REVISION = "2b3c4d5e6f7a"
 
 
 def _database_url(database_name: str) -> str:

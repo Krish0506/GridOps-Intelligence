@@ -87,6 +87,40 @@ volume).
 
 **READY** — three-way split 60/20/20; logistic regression, Random Forest, and HistGradientBoosting all implemented and trained. All validation and final-test metrics are 1.0 (synthetic data — not a real-world claim).
 
+## Current milestone: Phase 4 Evidence Intelligence
+
+- [x] Synthetic engineering document corpus generator (TXT/DOCX/PDF).
+- [x] Document ingestion pipeline with idempotency and partial-failure handling.
+- [x] Hybrid retrieval with reranking.
+- [x] Grounded answer generation with citation validation.
+- [x] Asset-aware evidence integration.
+- [x] Knowledge API endpoints.
+- [x] CLI commands for knowledge workflows.
+- [x] Database migration 0a1b2c3d4e5f.
+- [x] Documentation in docs/PHASE_4_EVIDENCE_INTELLIGENCE.md and related.
+
+## Current milestone: Phase 5 Engineering Decision Workflow
+
+- [x] Decision state machine and business rules.
+- [x] Database models and migration 2b3c4d5e6f7a.
+- [x] Decision evidence association with validation.
+- [x] Append-only audit history.
+- [x] Decision API endpoints.
+- [x] CLI commands for decision workflows.
+- [x] Tests (14 new; full suite green).
+- [x] Documentation in docs/PHASE_5_ENGINEERING_DECISION_WORKFLOW.md and related.
+
+## Current milestone: Phase 6/7 Frontend and Platform Integration
+
+- [x] React + TypeScript + Vite + Tailwind frontend scaffold.
+- [x] Shared application shell with sidebar navigation.
+- [x] Pages: Overview, Asset Explorer, Predictive Analytics, Risk Prioritization, Explainability, Evidence Intelligence, Engineering Decision Review, Governance and Audit.
+- [x] Frontend wired to backend APIs (no hardcoded metrics).
+- [x] TypeScript type checking passes.
+- [x] Production build succeeds.
+- [x] Smoke test passes.
+- [x] Documentation: PHASE_6, PHASE_7, DEMO_RUNBOOK, KNOWN_LIMITATIONS.
+
 ## Engineering rules
 
 - Synthetic data only; no employer-confidential information.

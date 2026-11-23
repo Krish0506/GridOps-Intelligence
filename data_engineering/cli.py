@@ -257,7 +257,131 @@ def build_parser() -> argparse.ArgumentParser:
     p_risk.add_argument("--observation-days", type=int, default=365)
     p_risk.set_defaults(func=run_risk)
 
+    p_list_decisions = subparsers.add_parser("list-pending-decisions", help="List pending engineering decisions.")
+    p_list_decisions.set_defaults(func=run_list_pending_decisions)
+
+    p_get_decision = subparsers.add_parser("get-decision", help="Retrieve an engineering decision.")
+    p_get_decision.add_argument("decision_id")
+    p_get_decision.set_defaults(func=run_get_decision)
+
+    p_history = subparsers.add_parser("show-decision-history", help="Show decision audit history.")
+    p_history.add_argument("decision_id")
+    p_history.set_defaults(func=run_show_decision_history)
+
     return parser
+    p_gen_docs.add_argument("--output", default="data/knowledge_base/source_documents")
+    p_gen_docs.set_defaults(func=run_generate_knowledge)
+
+    p_ingest = subparsers.add_parser("ingest-knowledge-documents", help="Ingest synthetic engineering documents.")
+    p_ingest.add_argument("--source-dir", default="data/knowledge_base/source_documents")
+    p_ingest.set_defaults(func=run_ingest_knowledge)
+
+    p_search = subparsers.add_parser("search-knowledge", help="Search engineering evidence.")
+    p_search.add_argument("query")
+    p_search.add_argument("--top-k", type=int, default=5)
+    p_search.set_defaults(func=run_search_knowledge)
+
+    p_ask = subparsers.add_parser("ask-knowledge", help="Ask a grounded engineering question.")
+    p_ask.add_argument("question")
+    p_ask.add_argument("--asset-id", default=None)
+    p_ask.add_argument("--top-k", type=int, default=5)
+    p_ask.set_defaults(func=run_ask_knowledge)
+
+    return parser
+
+
+def run_generate_knowledge(args: argparse.Namespace) -> int:
+    from rag.documents import generate_corpus
+
+    manifest = generate_corpus(Path(args.output))
+    print(f"Generated {len(manifest)} documents in {args.output}")
+    return 0
+
+
+def run_ingest_knowledge(args: argparse.Namespace) -> int:
+    from rag.embeddings import MockEmbeddingProvider
+    from rag.ingestion import ingest_directory
+    from rag.repository import SQLAlchemyKnowledgeRepository
+
+    from backend.app.database import get_db
+
+    session = next(get_db())
+    repository = SQLAlchemyKnowledgeRepository(session)
+    provider = MockEmbeddingProvider()
+    result = ingest_directory(Path(args.source_dir), repository, provider)
+    session.commit()
+    print(result)
+    return 0
+
+
+def run_search_knowledge(args: argparse.Namespace) -> int:
+    from rag.embeddings import MockEmbeddingProvider
+    from rag.repository import SQLAlchemyKnowledgeRepository
+    from rag.service import EvidenceService
+
+    from backend.app.database import get_db
+
+    session = next(get_db())
+    repository = SQLAlchemyKnowledgeRepository(session)
+    provider = MockEmbeddingProvider()
+    service = EvidenceService(repository, provider)
+    results = service.search(args.query, top_k=args.top_k)
+    for item in results:
+        print(item["chunk_id"], round(item.get("rerank_score", item.get("combined_score", 0.0)), 4), item.get("text", "")[:80])
+    return 0
+
+
+def run_ask_knowledge(args: argparse.Namespace) -> int:
+    from rag.embeddings import MockEmbeddingProvider
+    from rag.generation import MockGenerationProvider
+    from rag.repository import SQLAlchemyKnowledgeRepository
+    from rag.service import EvidenceService
+
+    from backend.app.database import get_db
+
+    session = next(get_db())
+    repository = SQLAlchemyKnowledgeRepository(session)
+    provider = MockEmbeddingProvider()
+    generator = MockGenerationProvider()
+    service = EvidenceService(repository, provider, generator)
+    result = service.ask(args.question, asset_id=args.asset_id, top_k=args.top_k)
+    print(result["answer"])
+    print("Citations:", [c.get("chunk_id") for c in result["citations"]])
+    return 0
+
+
+def run_list_pending_decisions(args: argparse.Namespace) -> int:
+    from backend.app.database import get_db
+    from decisions.service import list_decisions
+
+    session = next(get_db())
+    items, total = list_decisions(session, status="PENDING_REVIEW")
+    print({"total": total, "items": [str(d.decision_id) for d in items]})
+    return 0
+
+
+def run_get_decision(args: argparse.Namespace) -> int:
+    from uuid import UUID
+
+    from backend.app.database import get_db
+    from decisions.service import get_decision
+
+    session = next(get_db())
+    decision = get_decision(session, UUID(args.decision_id))
+    print(decision.decision_status if decision else "not found")
+    return 0 if decision else 4
+
+
+def run_show_decision_history(args: argparse.Namespace) -> int:
+    from uuid import UUID
+
+    from backend.app.database import get_db
+    from decisions.service import get_history
+
+    session = next(get_db())
+    events = get_history(session, UUID(args.decision_id))
+    print([{"action": e.action, "new_status": e.new_status} for e in events])
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
