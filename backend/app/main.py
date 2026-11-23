@@ -7,6 +7,8 @@ from sqlalchemy import text
 
 from backend.app.api import router
 from backend.app.database import engine
+from backend.app.decision_api import router as decision_router
+from backend.app.knowledge_api import router as knowledge_router
 
 app = FastAPI(
     title="GridOps Intelligence API",
@@ -30,3 +32,5 @@ def database_health() -> dict[str, str]:
 
 
 app.include_router(router)
+app.include_router(knowledge_router)
+app.include_router(decision_router)

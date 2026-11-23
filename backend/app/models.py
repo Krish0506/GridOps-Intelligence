@@ -433,6 +433,91 @@ class IngestionDatasetResult(Base):
     run: Mapped[IngestionRun] = relationship(back_populates="dataset_results")
 
 
+class KnowledgeDocument(Base):
+    """Synthetic engineering document metadata and extracted text."""
+
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        Index("ix_knowledge_documents_category", "category"),
+        Index("ix_knowledge_documents_checksum", "checksum"),
+    )
+
+    document_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    source_filename: Mapped[str] = mapped_column(String(256), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    revision: Mapped[str] = mapped_column(String(32), nullable=False)
+    publication_date: Mapped[date | None] = mapped_column(Date)
+    equipment_applicability: Mapped[str | None] = mapped_column(String(64))
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ingested")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class DocumentChunk(Base):
+    """Chunk of a knowledge document with its embedding."""
+
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        Index("ix_document_chunks_document_id", "document_id"),
+        Index("ix_document_chunks_checksum", "source_checksum"),
+    )
+
+    chunk_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("knowledge_documents.document_id", ondelete="CASCADE"), nullable=False
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding_dim: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    chunk_metadata: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
+
+
+class KnowledgeIngestionRun(Base):
+    """One knowledge-base ingestion run."""
+
+    __tablename__ = "knowledge_ingestion_runs"
+    __table_args__ = (
+        Index("ix_knowledge_ingestion_runs_started_at", "started_at"),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    documents_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunks_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class DataQualityResult(Base):
     """Persisted data-quality check result for one dataset and run."""
 
@@ -457,4 +542,100 @@ class DataQualityResult(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    run: Mapped[IngestionRun] = relationship(back_populates="quality_results")
+    run: Mapped["IngestionRun"] = relationship(back_populates="quality_results")
+class EngineeringDecision(Base):
+    """Human engineering decision for an asset risk assessment."""
+
+    __tablename__ = "engineering_decisions"
+    __table_args__ = (
+        Index("ix_engineering_decisions_asset_id", "asset_id"),
+        Index("ix_engineering_decisions_status", "decision_status"),
+        CheckConstraint(
+            "decision_status IN ('PENDING_REVIEW', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'OVERRIDDEN', 'ESCALATED', 'DEFERRED')",
+            name="decision_status",
+        ),
+    )
+
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    asset_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    predicted_risk_probability: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    risk_category: Mapped[str | None] = mapped_column(String(32))
+    anomaly_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    decision_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING_REVIEW")
+    decision_reason: Mapped[str | None] = mapped_column(Text)
+    replacement_risk_category: Mapped[str | None] = mapped_column(String(32))
+    review_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewer: Mapped[str] = mapped_column(String(128), nullable=False, default="demo-reviewer")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    evidence: Mapped[list["DecisionEvidence"]] = relationship(
+        back_populates="decision", cascade="all, delete-orphan", passive_deletes=True
+    )
+    history: Mapped[list["DecisionEvent"]] = relationship(
+        back_populates="decision", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class DecisionEvidence(Base):
+    """Evidence associated with an engineering decision."""
+
+    __tablename__ = "decision_evidence"
+    __table_args__ = (
+        Index("ix_decision_evidence_decision_id", "decision_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("engineering_decisions.decision_id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    chunk_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_title: Mapped[str] = mapped_column(String(256), nullable=False)
+    revision: Mapped[str] = mapped_column(String(32), nullable=False)
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    source_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    decision: Mapped[EngineeringDecision] = relationship(back_populates="evidence")
+
+
+class DecisionEvent(Base):
+    """Append-only audit history for engineering decisions."""
+
+    __tablename__ = "decision_events"
+    __table_args__ = (
+        Index("ix_decision_events_decision_id", "decision_id"),
+        Index("ix_decision_events_timestamp", "timestamp"),
+    )
+
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("engineering_decisions.decision_id", ondelete="CASCADE"), nullable=False
+    )
+    previous_status: Mapped[str | None] = mapped_column(String(32))
+    new_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    reviewer: Mapped[str] = mapped_column(String(128), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    prediction_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    evidence_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+
+    decision: Mapped[EngineeringDecision] = relationship(back_populates="history")
