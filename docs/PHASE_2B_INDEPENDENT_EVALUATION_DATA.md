@@ -84,7 +84,7 @@ Defaults (all configurable via CLI):
 | Parameter | Default |
 |---|---|
 | Seed | `20261122` |
-| Asset count | `240` |
+| Asset count | `1500` |
 | Observation days | `365` |
 | Horizon days | `90` |
 | Failure prevalence | `0.12` |
@@ -109,10 +109,10 @@ module before writing the manifest.
 
 Default-run results (seed `20261122`):
 
-- Total assets: 240 (transformers 96, substations 48, circuit breakers 48,
-  feeders 48).
-- Failures: 26 confirmed positives.
-- Label distribution: 26 confirmed positive / 191 confirmed negative / 23 unknown
+- Total assets: 1500 (transformers 600, substations 300, circuit breakers 300,
+  feeders 300).
+- Failures: 176 confirmed positives.
+- Label distribution: 176 confirmed positive / 1181 confirmed negative / 143 unknown
   (the unknowns correspond to incomplete-history assets).
 - All generated tables pass the shared validation suite (no hard errors).
 

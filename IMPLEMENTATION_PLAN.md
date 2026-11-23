@@ -69,7 +69,23 @@ volume).
 
 ## Next milestone: Phase 3 model training and evaluation
 
-- [ ] Not started. Blocked on Phase 2B modeling readiness.
+- [x] Implement data-readiness gate (`ml/data/readiness.py`, `ml/data/cohort.py`).
+- [x] Raise independent-evaluation default population to 1500 assets (configurable).
+- [x] Implement logistic regression, Random Forest, and HistGradientBoosting baselines (`ml/models/`).
+- [x] Implement metrics, training/inference workflows, artifact persistence (`ml/evaluation/`, `ml/pipelines/`, `ml/artifacts/`).
+- [x] Implement anomaly detection via robust z-scores (`ml/anomaly/`).
+- [x] Implement risk-prioritization schema (`ml/risk/`).
+- [x] Add CLI workflows (`data_engineering/cli.py`).
+- [x] Add focused tests (31 new tests; full suite green).
+- [x] Document in `docs/PHASE_3_PREDICTIVE_MODELING.md`.
+
+### Data readiness
+
+**READY** — default dataset: 1500 assets, 176 confirmed positives, 1181 confirmed negatives, 143 unknown.
+
+### Modeling readiness
+
+**READY** — three-way split 60/20/20; logistic regression, Random Forest, and HistGradientBoosting all implemented and trained. All validation and final-test metrics are 1.0 (synthetic data — not a real-world claim).
 
 ## Engineering rules
 
