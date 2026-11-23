@@ -25,7 +25,8 @@ Thumbs.db
 data/generated/
 data/processed/
 data/evaluation/
-models/
+/models/
+ml/artifacts/models/
 mlruns/
 
 # Node
