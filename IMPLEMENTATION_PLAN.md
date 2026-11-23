@@ -39,6 +39,38 @@ the pipeline exposes, and no defensible confirmed-negative cohort exists. Predic
 validation must wait for a future synthetic-data milestone that decouples failure generation
 from feature construction and provides an independent observation/follow-up process.
 
+## Current milestone: Phase 2B independent synthetic evaluation data
+
+- [x] Add an independent synthetic evaluation-data generator
+  (`data_engineering/generators/independent_evaluation.py`) whose failure events
+  follow hidden degradation processes independent of the telemetry risk score.
+- [x] Generate historical telemetry as noisy observations of the hidden
+  degradation process, strictly before failures and before the prediction cutoff.
+- [x] Generate maintenance, inspections, and weather records independently of
+  future failure labels.
+- [x] Apply the Milestone 2A three-state label contract (positive / negative /
+  unknown) to the independent dataset.
+- [x] Run the shared synthetic-data validation suite on the new dataset.
+- [x] Add feature snapshots through the existing Milestone 2A feature builders
+  with per-asset event bounds.
+- [x] Add focused tests for the independent generator, labels, temporal
+  safeguards, reproducibility, and feature integration (8 new tests; full suite
+  passes).
+- [x] Document methodology, parameters, limitations, and usage in
+  `docs/PHASE_2B_INDEPENDENT_EVALUATION_DATA.md`.
+
+### Modeling readiness
+
+**BLOCKED** — the independent evaluation dataset removes the circularity in failure
+selection, but predictive-model training and evaluation remain blocked on the
+remaining synthetic-data limitations (transparent degradation-threshold
+simulation, confirmed-negative follow-up process, sufficient positive/negative
+volume).
+
+## Next milestone: Phase 3 model training and evaluation
+
+- [ ] Not started. Blocked on Phase 2B modeling readiness.
+
 ## Engineering rules
 
 - Synthetic data only; no employer-confidential information.
