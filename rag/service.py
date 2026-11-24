@@ -21,14 +21,25 @@ class EvidenceService:
         results = search(self.repository, query, self.provider, top_k=top_k, category=category, equipment=equipment)
         return rerank(results)
 
-    def ask(self, question: str, *, asset_id: str | None = None, top_k: int = 5):
-        equipment = equipment_filter_for_asset(asset_id) if asset_id else None
-        retrieved = self.search(question, top_k=top_k, equipment=equipment)
+    def ask(self, question: str, *, asset_id: str | None = None, top_k: int = 5, category: str | None = None, equipment: str | None = None):
+        equipment = equipment or (equipment_filter_for_asset(asset_id) if asset_id else None)
+        retrieved = self.search(question, top_k=top_k, category=category, equipment=equipment)
         citations = citations_from_retrieval(retrieved)
         citations = validate_citations(citations, retrieved)
         prompt = build_prompt(question, retrieved)
         answer = self.generator.generate(prompt)
-        evidence_sufficient = len(retrieved) > 0
+        # A retrievable chunk is not automatically sufficient evidence.  Require
+        # either a meaningful keyword match or a strong combined score.
+        evidence_sufficient = any(
+            float(item.get("keyword_score") or 0.0) >= 0.2
+            or float(item.get("combined_score") or 0.0) >= 0.45
+            for item in retrieved
+        )
+        if evidence_sufficient:
+            top_score = max(float(item.get("combined_score") or 0.0) for item in retrieved)
+            confidence = "high" if top_score >= 0.35 else "medium"
+        else:
+            confidence = "low"
         return {
             "question": question,
             "asset_id": asset_id,
@@ -40,12 +51,14 @@ class EvidenceService:
                 "Anomaly scores and risk outputs are not calibrated failure probabilities.",
             ],
             "evidence_sufficient": evidence_sufficient,
-            "confidence": "high" if evidence_sufficient and len(retrieved) >= 3 else "low",
+            "confidence": confidence,
             "provider": getattr(self.generator, "model_name", "unknown"),
         }
 
-    def ingest(self, source_dir, provider=None):
-        return ingest_directory(source_dir, self.repository, provider or self.provider)
+    def ingest(self, source_dir, provider=None, *, force: bool = False):
+        return ingest_directory(
+            source_dir, self.repository, provider or self.provider, force=force
+        )
 
 
 __all__ = ["EvidenceService"]

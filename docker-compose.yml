@@ -29,6 +29,8 @@
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      - ./ml/artifacts:/app/ml/artifacts
     depends_on:
       db:
         condition: service_healthy

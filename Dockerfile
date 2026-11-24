@@ -11,6 +11,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend ./backend
 COPY data_engineering ./data_engineering
+COPY rag ./rag
+COPY decisions ./decisions
+COPY ml ./ml
+COPY alembic ./alembic
+COPY alembic.ini .
 COPY scripts ./scripts
 COPY tests ./tests
 

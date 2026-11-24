@@ -6,9 +6,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
+from backend.app.models import Asset, EngineeringDecision, RiskRecord
 from backend.app.schemas import Page
 from decisions.service import (
     DecisionError,
@@ -118,12 +120,34 @@ def _handle_error(exc: DecisionError):
 @router.get("", response_model=Page[DecisionOut])
 def list_decisions_endpoint(
     status: str | None = None,
+    search: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_db),
 ):
-    items, total = list_decisions(session, status=status, limit=limit, offset=offset)
+    items, total = list_decisions(
+        session, status=status, search=search, limit=limit, offset=offset
+    )
     return Page(items=[_decision_out(d) for d in items], total=total, limit=limit, offset=offset)
+
+
+@router.get("/summary")
+def decisions_summary_endpoint(session: Session = Depends(get_db)):
+    """Return decision counts by status plus recent audit activity."""
+    counts = {
+        row[0]: row[1]
+        for row in session.query(
+            EngineeringDecision.decision_status, func.count()
+        ).group_by(EngineeringDecision.decision_status)
+    }
+    active = counts.get("PENDING_REVIEW", 0) + counts.get("IN_REVIEW", 0)
+    return {
+        "total": sum(counts.values()),
+        "active": active,
+        "by_status": counts,
+        "synthetic": True,
+        "note": "All decisions require a human reviewer; the platform never auto-approves.",
+    }
 
 
 @router.post("", response_model=DecisionOut, status_code=201)
@@ -156,6 +180,74 @@ def get_decision_endpoint(decision_id: str, session: Session = Depends(get_db)):
     if decision is None:
         raise HTTPException(status_code=404, detail="decision not found")
     return _decision_out(decision)
+
+
+@router.get("/{decision_id}/detail")
+def decision_detail_endpoint(decision_id: str, session: Session = Depends(get_db)):
+    """Return a decision with asset context, audit history, and evidence."""
+    try:
+        decision = get_decision(session, UUID(decision_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="decision not found")
+    if decision is None:
+        raise HTTPException(status_code=404, detail="decision not found")
+    asset = session.get(Asset, decision.asset_id)
+    risk = (
+        session.query(RiskRecord)
+        .filter(RiskRecord.asset_id == decision.asset_id)
+        .order_by(RiskRecord.prediction_cutoff.desc())
+        .first()
+    )
+    events = get_history(session, UUID(decision_id))
+    evidence = get_evidence(session, UUID(decision_id))
+    return {
+        "decision": _decision_out(decision).model_dump(),
+        "asset": None
+        if asset is None
+        else {
+            "asset_id": asset.asset_id,
+            "name": asset.name,
+            "asset_type": asset.asset_type,
+            "status": asset.status,
+            "region": asset.region,
+        },
+        "current_risk": None
+        if risk is None
+        else {
+            "risk_category": risk.risk_category,
+            "model_probability": None
+            if risk.model_probability is None
+            else float(risk.model_probability),
+            "anomaly_score": None if risk.anomaly_score is None else float(risk.anomaly_score),
+            "model_version": risk.model_version,
+            "prediction_cutoff": risk.prediction_cutoff.isoformat(),
+        },
+        "history": [
+            DecisionEventOut(
+                event_id=str(event.event_id),
+                previous_status=event.previous_status,
+                new_status=event.new_status,
+                action=event.action,
+                reviewer=event.reviewer,
+                reason=event.reason,
+                timestamp=event.timestamp.isoformat(),
+            ).model_dump()
+            for event in events
+        ],
+        "evidence": [
+            DecisionEvidenceOut(
+                id=item.id,
+                document_id=item.document_id,
+                chunk_id=item.chunk_id,
+                document_title=item.document_title,
+                revision=item.revision,
+                page_number=item.page_number,
+                excerpt=item.excerpt,
+                source_checksum=item.source_checksum,
+            ).model_dump()
+            for item in evidence
+        ],
+    }
 
 
 @router.post("/{decision_id}/review", response_model=DecisionOut)

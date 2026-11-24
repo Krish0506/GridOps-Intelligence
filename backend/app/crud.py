@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.models import (
@@ -51,19 +51,83 @@ def list_assets(
     asset_type: str | None = None,
     status: str | None = None,
     region: str | None = None,
+    search: str | None = None,
+    sort_by: str = "asset_id",
+    sort_dir: str = "asc",
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Asset], int]:
-    """List assets with optional filters and pagination."""
+    """List assets with global search, filters, sorting, and pagination.
+
+    ``region="__unassigned__"`` selects assets whose region is NULL; a blank
+    region string is treated as "no filter" rather than as a literal empty
+    value.
+    """
     statement = select(Asset)
-    if asset_type is not None:
-        statement = statement.where(Asset.asset_type == asset_type)
-    if status is not None:
-        statement = statement.where(Asset.status == status)
-    if region is not None:
-        statement = statement.where(Asset.region == region)
+    if asset_type and asset_type.strip():
+        statement = statement.where(Asset.asset_type == asset_type.strip())
+    if status and status.strip():
+        statement = statement.where(Asset.status == status.strip())
+    if region and region.strip():
+        region_value = region.strip()
+        if region_value.lower() in {"__unassigned__", "unassigned", "none", "null"}:
+            statement = statement.where(Asset.region.is_(None))
+        else:
+            statement = statement.where(Asset.region == region_value)
+    if search is not None and search.strip():
+        term = f"%{search.strip()}%"
+        statement = statement.where(
+            or_(
+                Asset.asset_id.ilike(term),
+                Asset.name.ilike(term),
+                Asset.region.ilike(term),
+            )
+        )
+
+    sort_columns = {
+        "asset_id": Asset.asset_id,
+        "asset_type": Asset.asset_type,
+        "name": Asset.name,
+        "status": Asset.status,
+        "region": Asset.region,
+        "install_date": Asset.install_date,
+        "operating_hours_cumulative": Asset.operating_hours_cumulative,
+    }
+    column = sort_columns.get(sort_by, Asset.asset_id)
+    statement = statement.order_by(column.desc() if sort_dir.lower() == "desc" else column.asc())
     rows, total = _paginate(statement, session, limit=limit, offset=offset)
     return rows, total
+
+
+def asset_filter_options(session: Session) -> dict[str, object]:
+    """Return the actual filter values present in the asset dimension."""
+    by_type = [
+        {"value": value, "label": value.replace("_", " ").title(), "count": count}
+        for value, count in session.execute(
+            select(Asset.asset_type, func.count())
+            .group_by(Asset.asset_type)
+            .order_by(Asset.asset_type)
+        )
+    ]
+    by_status = [
+        {"value": value, "label": value.title(), "count": count}
+        for value, count in session.execute(
+            select(Asset.status, func.count()).group_by(Asset.status).order_by(Asset.status)
+        )
+    ]
+    by_region = [
+        {
+            "value": "__unassigned__" if region is None else region,
+            "label": "Unassigned" if region is None else region,
+            "count": count,
+        }
+        for region, count in session.execute(
+            select(Asset.region, func.count())
+            .group_by(Asset.region)
+            .order_by(func.coalesce(Asset.region, "zzz"))
+        )
+    ]
+    return {"asset_types": by_type, "statuses": by_status, "regions": by_region}
 
 
 def get_asset(session: Session, asset_id: str) -> Asset | None:
@@ -170,13 +234,32 @@ def get_ingestion_run(session: Session, run_id: str) -> IngestionRun | None:
     return session.get(IngestionRun, UUID(run_id))
 
 
+def list_risk_records(
+    session: Session,
+    *,
+    asset_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Any], int]:
+    from backend.app.models import RiskRecord
+
+    statement = select(RiskRecord)
+    if asset_id is not None:
+        statement = statement.where(RiskRecord.asset_id == asset_id)
+    statement = statement.order_by(RiskRecord.id)
+    rows, total = _paginate(statement, session, limit=limit, offset=offset)
+    return rows, total
+
+
 __all__ = [
+    "asset_filter_options",
     "count_assets",
     "get_asset",
     "get_ingestion_run",
     "list_assets",
     "list_failures",
     "list_ingestion_runs",
+    "list_risk_records",
     "list_telemetry",
     "list_work_orders",
 ]

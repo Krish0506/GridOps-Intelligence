@@ -1,3 +1,100 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-ink-50 text-ink-900 font-sans;
+    background-image:
+      radial-gradient(circle at 82% -10%, rgba(6, 182, 212, 0.08), transparent 34%),
+      radial-gradient(circle at 4% 0%, rgba(37, 99, 235, 0.05), transparent 30%);
+    background-attachment: fixed;
+  }
+
+  * {
+    @apply border-ink-300/60;
+  }
+
+  ::selection {
+    @apply bg-teal-200 text-navy-950;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ink-300 rounded-full;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-xl border border-ink-300 bg-white px-3.5 py-2.5 text-sm text-ink-900 shadow-sm outline-none transition placeholder:text-ink-500/70 focus:border-teal-500 focus:ring-4 focus:ring-teal-500/10;
+  }
+
+  .label {
+    @apply mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus:ring-4 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-navy-900 text-white shadow-sm hover:bg-navy-800 focus:ring-navy-900/15;
+  }
+
+  .btn-accent {
+    @apply btn bg-teal-600 text-white shadow-sm hover:bg-teal-700 focus:ring-teal-600/20;
+  }
+
+  .btn-ghost {
+    @apply btn border border-ink-300 bg-white text-ink-700 hover:border-ink-500/50 hover:bg-ink-100 focus:ring-ink-300/30;
+  }
+
+  .btn-danger {
+    @apply btn bg-signal-red text-white hover:bg-red-700 focus:ring-red-600/20;
+  }
+
+  .card {
+    @apply rounded-2xl border border-ink-300/70 bg-white shadow-card;
+  }
+
+  .table-head {
+    @apply bg-ink-50/80 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-500;
+  }
+
+  .table-cell {
+    @apply px-4 py-3 text-sm text-ink-700;
+  }
+
+  .table-row {
+    @apply border-t border-ink-300/50 transition hover:bg-teal-50/40;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold;
+  }
+
+  .nav-link {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-white/5 hover:text-white;
+  }
+
+  .nav-link-active {
+    @apply bg-white/10 text-white shadow-inner;
+  }
+
+  .skip-link {
+    @apply absolute left-4 top-4 z-50 -translate-y-24 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-navy-900 shadow-float transition focus:translate-y-0;
+  }
+}

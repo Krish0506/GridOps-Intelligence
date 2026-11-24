@@ -1,110 +1,127 @@
 ﻿# GridOps Intelligence
 
-Explainable AI and predictive maintenance platform combining classical machine learning, retrieval-augmented generation (RAG), utility asset risk intelligence, and human-in-the-loop decision support.
+**Explainable AI and predictive maintenance platform for utility asset reliability.**
 
-> **Project status:** Phase 1B complete. The synthetic data foundation is implemented and verified: PostgreSQL schema via Alembic, validated idempotent ETL, data-quality reporting, read-only API, and integration tests. This is an independent portfolio project using synthetic data only. It is not a DTE system, is not connected to utility operational systems, and does not make real maintenance decisions.
+> **Status:** M1–M9 complete. This is an **independent portfolio project** using
+> **synthetic data only**. It is not a DTE system, is not connected to utility
+> operational systems, and does not make real maintenance decisions. All data,
+> documents, models, and predictions are synthetic demonstration material.
 
-## Phase 1B delivered capabilities
+## What it does
 
-- SQLAlchemy 2.x models for assets, type-specific details, telemetry, events, and ingestion/quality observability tables.
-- Initial Alembic migration `04b9afe7bc6a` (head) creating the operational schema.
-- Validated, idempotent CSV-to-PostgreSQL ETL with structured ingestion reports and rejected-row reporting.
-- Data-quality checks persisted per ingestion run.
-- Read-only FastAPI endpoints under `/api/v1` with pagination and Pydantic response schemas.
-- Integration tests for database schema, Alembic migration, ETL, and API.
+GridOps Intelligence demonstrates an end-to-end workflow:
 
-## Initial technology foundation
+1. **Synthetic utility data** — assets, telemetry, maintenance, inspections, failures, weather.
+2. **Leakage-safe feature engineering** — strict temporal cutoffs, per-asset event bounds, three-state labels.
+3. **Predictive failure-risk modeling** — Logistic Regression, Random Forest, HistGradientBoosting baselines.
+4. **Anomaly detection** — robust z-score baseline over feature vectors.
+5. **Risk prioritization** — per-asset risk records separating probability, anomaly, criticality, and data quality.
+6. **Evidence Intelligence (RAG)** — synthetic engineering documents, hybrid retrieval, grounded answers with citations.
+7. **Human engineering decision workflow** — review, approve/reject/override/escalate/defer with audit history.
+8. **React frontend** — operations dashboard, asset explorer, predictive analytics, risk, evidence, decisions, governance.
 
-- Python 3.11 and FastAPI
-- PostgreSQL 16 with pgvector
-- SQLAlchemy 2.x and Alembic
+## Architecture
+
+```mermaid
+flowchart LR
+  A[Synthetic Data Generators] --> B[PostgreSQL]
+  B --> C[Feature Engineering ml/features]
+  C --> D[Model Training ml/models]
+  D --> E[Risk Records]
+  F[Synthetic Docs] --> G[Ingestion + Embeddings]
+  G --> H[Hybrid Retrieval + Rerank]
+  H --> I[Grounded Generation]
+  I --> J[Citations]
+  E --> K[Decision Workflow]
+  J --> K
+  K --> L[Audit History]
+  B --> M[FastAPI /api/v1]
+  M --> N[React Frontend]
+```
+
+## Tech stack
+
+- Python 3.11, FastAPI, Pydantic, SQLAlchemy, Alembic
+- PostgreSQL 16 (pgvector image)
+- scikit-learn, NumPy
+- React 18, TypeScript, Vite, Tailwind CSS
 - Docker Compose
 - Pytest
 
-## Prerequisites
-
-- Docker Desktop with Linux containers enabled
-- Git
-- Python 3.11+ (for running tests locally)
-
 ## Quick start
 
-1. Copy `.env.example` to `.env`:
+1. Copy environment file:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-2. Start PostgreSQL and the API:
+2. Start PostgreSQL and apply migrations:
 
    ```powershell
-   docker compose up --build -d
+   docker compose up -d db
+   .\.venv\Scripts\python.exe -m alembic upgrade head
    ```
 
-3. Check service status:
+3. Start the API:
 
    ```powershell
-   docker compose ps
+   docker compose up -d api
+   # or locally: .\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
    ```
 
-4. Check API health:
+4. Initialize demo data (idempotent):
 
    ```powershell
-   Invoke-RestMethod http://localhost:8000/health
-   Invoke-RestMethod http://localhost:8000/health/db
+   .\.venv\Scripts\python.exe -m data_engineering.cli initialize-demo
    ```
 
-5. Apply the database schema:
+5. Start the frontend:
 
    ```powershell
-   .\.venv\Scripts\Activate.ps1
-   alembic upgrade head
+   cd frontend
+   npm install
+   npm run dev
    ```
 
-6. Run the synthetic ingestion:
+6. Open http://localhost:5173
 
-   ```powershell
-   python -m data_engineering.etl
-   ```
-
-7. Open API documentation:
-
-   http://localhost:8000/docs
-
-## Run tests locally
+## Key commands
 
 ```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m pytest -q
+# Tests
+.\.venv\Scripts\python.exe -m pytest -q
+
+# Frontend
+cd frontend; npm run typecheck; npm run build; npm run test
+
+# Generate + ingest knowledge documents
+python -m data_engineering.cli generate-knowledge-documents
+python -m data_engineering.cli ingest-knowledge-documents
+
+# Train model
+python -m data_engineering.cli train --output data/evaluation --model logistic_regression
+
+# Risk records
+python -m data_engineering.cli risk --output data/evaluation --persist
 ```
 
-The integration tests use a dedicated `gridops_test` PostgreSQL database and a
-separate `gridops_migration_scratch` database for reversible migration checks; they
-do not reset the development database.
+## Known limitations
 
-## Read-only API endpoints
+- Synthetic data only; not real-world utility performance.
+- No authentication or authorization.
+- PDF extraction is lightweight (no OCR).
+- Anomaly scores are not calibrated probabilities.
+- Ollama providers require a running instance (not auto-started).
+- Single holdout-style split (no repeated cross-validation).
+- No frontend container in Docker Compose.
 
-- `GET /health` and `GET /health/db`
-- `GET /api/v1/assets` (filters: `asset_type`, `status`, `region`; pagination: `limit`, `offset`)
-- `GET /api/v1/assets/{asset_id}` (includes type-specific detail when present)
-- `GET /api/v1/telemetry/{asset_id}` (optional `start`/`end` window; pagination: `limit`, `offset`)
-- `GET /api/v1/failures` (filters: `failure_category`, `failure_severity`, `asset_id`; pagination: `limit`, `offset`)
-- `GET /api/v1/work-orders` (filters: `work_type`, `priority`, `status`, `asset_id`; pagination: `limit`, `offset`)
-- `GET /api/v1/ingestion/runs` (pagination: `limit`, `offset`)
-- `GET /api/v1/ingestion/runs/{run_id}` (dataset results and quality results)
+## Implementation status
 
-## Planned development phases
+Milestones M1–M9 complete. See `docs/PHASE_*` and `IMPLEMENTATION_PLAN.md`.
 
-1. Data foundation: synthetic datasets, PostgreSQL schema, repeatable ETL, and data-quality checks.
-2. Predictive analytics: failure-risk classification, anomaly detection, and asset prioritization.
-3. Explainability: global and local model explanations.
-4. Evidence intelligence: local RAG, hybrid retrieval, reranking, citations, and evaluation.
-5. Human review: approve, reject, override, escalate, and audit workflows.
-6. Application experience: operational dashboard and decision-review UI.
-7. Hardening: security, monitoring, model/data governance, and CI.
+## Synthetic-data disclaimer
 
-## Data and security
-
-Use synthetic or explicitly licensed public data only. Never commit credentials, private documents, employer data, customer information, or operational infrastructure details. The default database password is for local development only and must be changed before any shared or deployed environment.
+All data, documents, models, and predictions in this repository are synthetic
+demonstration material. This project is an independent portfolio piece and is
+not affiliated with, endorsed by, or connected to any utility company.

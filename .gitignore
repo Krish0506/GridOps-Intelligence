@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -25,6 +25,7 @@ Thumbs.db
 data/generated/
 data/processed/
 data/evaluation/
+data/knowledge_base/
 /models/
 ml/artifacts/models/
 mlruns/
@@ -35,3 +36,7 @@ dist/
 
 data/rejected/
 data/reports/
+
+# Local runtime and generated build metadata
+.run/
+*.tsbuildinfo

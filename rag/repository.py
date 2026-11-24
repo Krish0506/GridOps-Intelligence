@@ -126,6 +126,13 @@ class SQLAlchemyKnowledgeRepository:
         existing.category = document.category
         existing.revision = document.revision
         existing.equipment_applicability = document.equipment_applicability
+        if document.publication_date:
+            try:
+                from datetime import date
+
+                existing.publication_date = date.fromisoformat(document.publication_date[:10])
+            except (TypeError, ValueError):
+                existing.publication_date = None
         existing.extracted_text = document.extracted_text
         existing.status = document.status
         self.session.flush()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -12,6 +14,10 @@ class KnowledgeDocumentOut(BaseModel):
     revision: str
     source_filename: str
     checksum: str
+    equipment_applicability: str | None = None
+    publication_date: str | None = None
+    mime_type: str | None = None
+    chunk_count: int = 0
 
 
 class KnowledgeChunkOut(BaseModel):
@@ -20,6 +26,14 @@ class KnowledgeChunkOut(BaseModel):
     page_number: int | None
     text: str
     source_checksum: str
+    document_title: str | None = None
+    category: str | None = None
+    equipment: str | None = None
+
+
+class KnowledgeDocumentContentOut(KnowledgeDocumentOut):
+    extracted_text: str
+    chunks: list[KnowledgeChunkOut] = []
 
 
 class KnowledgeSearchRequest(BaseModel):
@@ -35,6 +49,7 @@ class KnowledgeSearchResult(BaseModel):
     title: str | None
     revision: str | None
     category: str | None
+    equipment: str | None = None
     page_number: int | None
     text: str
     semantic_score: float
@@ -43,10 +58,20 @@ class KnowledgeSearchResult(BaseModel):
     source_checksum: str
 
 
+class StructuredAnswerOut(BaseModel):
+    route: str = "structured_database"
+    metric: str
+    value: int | float | str | None
+    text: str
+    breakdown: dict[str, Any] = {}
+
+
 class KnowledgeAskRequest(BaseModel):
     question: str = Field(min_length=1)
     asset_id: str | None = None
     top_k: int = Field(default=5, ge=1, le=50)
+    category: str | None = None
+    equipment: str | None = None
 
 
 class CitationOut(BaseModel):
@@ -69,6 +94,8 @@ class KnowledgeAskResponse(BaseModel):
     evidence_sufficient: bool
     confidence: str
     provider: str
+    route: str = "document_retrieval"
+    structured_data: StructuredAnswerOut | None = None
 
 
 class IngestionRunOut(BaseModel):

@@ -249,10 +249,20 @@ def get_decision(session: Session, decision_id: UUID) -> EngineeringDecision | N
     return session.get(EngineeringDecision, decision_id)
 
 
-def list_decisions(session: Session, *, status: str | None = None, limit: int = 50, offset: int = 0) -> tuple[list[EngineeringDecision], int]:
+def list_decisions(
+    session: Session,
+    *,
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[EngineeringDecision], int]:
     query = session.query(EngineeringDecision)
     if status:
         query = query.filter(EngineeringDecision.decision_status == status)
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(EngineeringDecision.asset_id.ilike(term))
     total = query.count()
     items = query.order_by(EngineeringDecision.created_at.desc()).offset(offset).limit(limit).all()
     return items, total

@@ -445,7 +445,7 @@ class KnowledgeDocument(Base):
     document_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     source_filename: Mapped[str] = mapped_column(String(256), nullable=False)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
-    mime_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     revision: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -639,3 +639,29 @@ class DecisionEvent(Base):
     evidence_snapshot: Mapped[dict | None] = mapped_column(JSONB)
 
     decision: Mapped[EngineeringDecision] = relationship(back_populates="history")
+class RiskRecord(Base):
+    """Persisted operational risk prioritization record."""
+
+    __tablename__ = "risk_records"
+    __table_args__ = (
+        Index("ix_risk_records_asset_id", "asset_id"),
+        Index("ix_risk_records_risk_category", "risk_category"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asset_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    prediction_cutoff: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    risk_category: Mapped[str] = mapped_column(String(32), nullable=False)
+    anomaly_score: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    model_probability: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
+    data_quality: Mapped[dict | None] = mapped_column(JSONB)
+    primary_drivers: Mapped[list | None] = mapped_column(JSONB)
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    limitations: Mapped[list | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )

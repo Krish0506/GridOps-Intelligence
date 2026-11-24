@@ -183,7 +183,193 @@ def run_anomaly(args: argparse.Namespace) -> int:
     return 0
 
 
+OPERATIONAL_RISK_LIMITATIONS = [
+    "Synthetic demonstration data; not real utility asset condition or failure history.",
+    "The model probability is a classifier output on synthetic data, not a calibrated field failure probability.",
+    "The anomaly score is an unsupervised deviation magnitude and must not be read as a failure probability.",
+    "Review priority is a transparent triage band over probability and anomaly percentiles plus asset criticality.",
+    "Model inference is a batch snapshot at the prediction cutoff; the system does not retrain automatically.",
+]
+
+
+def _persist_operational_risk(session, records, *, batch_size: int = 500) -> int:
+    """Replace the derived risk workspace in one transaction.
+
+    Risk records are derived artifacts, so a full rebuild is idempotent: every
+    run writes exactly one record per operational asset at the prediction
+    cutoff.  No source fact table is touched.
+    """
+    from backend.app.models import RiskRecord as RiskRecordModel
+
+    session.query(RiskRecordModel).delete(synchronize_session=False)
+    for start in range(0, len(records), batch_size):
+        for record in records[start : start + batch_size]:
+            session.add(
+                RiskRecordModel(
+                    asset_id=record.asset_id,
+                    asset_type=record.asset_type,
+                    prediction_cutoff=record.prediction_cutoff,
+                    risk_category=record.risk_category,
+                    anomaly_score=record.anomaly_score,
+                    model_probability=record.model_probability,
+                    data_quality=record.data_quality,
+                    primary_drivers=record.primary_drivers,
+                    model_version=record.model_version,
+                    limitations=record.limitations,
+                )
+            )
+        session.flush()
+    session.commit()
+    return len(records)
+
+
+def run_operational_risk(args: argparse.Namespace) -> int:
+    """Build risk records for the operational assets using the trained model.
+
+    Unlike ``risk`` (which scores the independent evaluation cohort), this
+    workflow loads the live asset dimension from PostgreSQL, builds
+    leakage-safe feature snapshots at the reference cutoff, applies the
+    persisted classifier, fits the population anomaly baseline, persists that
+    baseline artifact, and optionally writes the risk workspace.
+    """
+    import json
+    from datetime import timezone
+
+    from backend.app.database import get_db
+    from backend.app.settings import (
+        DEFAULT_MODEL_NAME,
+        EXPLAINABILITY_DIR,
+        MODEL_DIR,
+        artifact_version,
+        model_artifact_path,
+        safe_artifact_reference,
+    )
+    from ml.features.repository import (
+        build_feature_records_for_assets,
+        load_assets,
+        load_failures,
+    )
+    from ml.risk.prioritization import build_risk_records
+
+    session = next(get_db())
+    try:
+        model_name = getattr(args, "model", DEFAULT_MODEL_NAME)
+        artifact = model_artifact_path(model_name)
+        if not artifact.exists():
+            print(
+                f"No trained model artifact at {safe_artifact_reference(artifact)}. "
+                "Run: python -m data_engineering.cli train --model logistic_regression"
+            )
+            return 4
+        model = load_model(artifact)
+        cutoff = REFERENCE_DATE
+        assets = load_assets(session)
+        if not assets:
+            print("No operational assets found. Run the data ingestion pipeline first.")
+            return 5
+        asset_ids = [asset.asset_id for asset in assets]
+        failures = load_failures(session)
+        first_failure: dict[str, datetime] = {}
+        for failure in failures:
+            if failure.failure_timestamp < cutoff:
+                first_failure.setdefault(failure.asset_id, failure.failure_timestamp)
+
+        print(f"Building feature snapshots for {len(asset_ids)} assets at {cutoff.isoformat()} ...")
+        snapshots = build_feature_records_for_assets(
+            session,
+            asset_ids,
+            cutoff,
+            exclude_at_or_after=first_failure or None,
+        )
+        if not snapshots:
+            print("No feature snapshots could be built.")
+            return 6
+        print(f"Built {len(snapshots)} snapshots; fitting population anomaly baseline ...")
+        medians, mads = fit_robust_baseline(snapshots)
+        probabilities = {
+            str(snapshot.get("asset_id") or ""): predict_positive_probability(model, snapshot)
+            for snapshot in snapshots
+        }
+        version = artifact_version(model_name)
+        records = build_risk_records(
+            snapshots=snapshots,
+            model_probabilities=probabilities,
+            model_version=version,
+            prediction_cutoff=cutoff,
+            medians=medians,
+            mads=mads,
+            limitations=OPERATIONAL_RISK_LIMITATIONS,
+        )
+
+        EXPLAINABILITY_DIR.mkdir(parents=True, exist_ok=True)
+        baseline_path = EXPLAINABILITY_DIR / "baseline.json"
+        baseline = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "prediction_cutoff": cutoff.isoformat(),
+            "asset_count": len(snapshots),
+            "model_name": model_name,
+            "model_version": version,
+            "z_cap": 50.0,
+            "medians": medians,
+            "scales": mads,
+            "feature_count": len(medians),
+            "methodology": (
+                "Population median and robust scale (MAD with IQR and standard-deviation "
+                "fallbacks plus a feature-scale floor) fitted on the operational synthetic "
+                "asset snapshots at the prediction cutoff."
+            ),
+            "artifact": safe_artifact_reference(baseline_path),
+        }
+        baseline_path.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
+        print(f"Baseline artifact: {safe_artifact_reference(baseline_path)}")
+
+        # Refresh model metadata with the fields the API reports, without
+        # retraining or replacing the pickle artifact.
+        metadata_path = MODEL_DIR / f"{model_name}.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            metadata = {}
+        metadata.update(
+            {
+                "model_name": model_name,
+                "model_version": version,
+                "threshold": float(getattr(model, "threshold", 0.5)),
+                "metrics": getattr(model, "metrics", {}) or metadata.get("metrics"),
+                "test_metrics": getattr(model, "test_metrics", {}) or metadata.get("test_metrics"),
+                "positive_count": getattr(model, "positive_count", metadata.get("positive_count")),
+                "negative_count": getattr(model, "negative_count", metadata.get("negative_count")),
+                "train_assets": len(getattr(model, "train_asset_ids", []) or []),
+                "validation_assets": len(getattr(model, "validation_asset_ids", []) or []),
+                "test_assets": len(getattr(model, "test_asset_ids", []) or []),
+                "metadata_refreshed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        if getattr(args, "persist", False):
+            persisted = _persist_operational_risk(session, records)
+            print(f"Persisted {persisted} risk records at {cutoff.isoformat()}.")
+        else:
+            print(
+                {
+                    "risk_records": len(records),
+                    "predicted_failure": sum(
+                        1 for record in records if record.risk_category == "predicted_failure"
+                    ),
+                    "model_version": version,
+                }
+            )
+        return 0
+    finally:
+        session.close()
+
+
 def run_risk(args: argparse.Namespace) -> int:
+    """Score the independent evaluation cohort (legacy Milestone 3 workflow)."""
+    from backend.app.database import get_db
+    from ml.risk.prioritization import build_risk_records
+
     _params, directory, cutoff, _horizon = _evaluation_context(args)
     snapshots = build_independent_feature_snapshots(directory, prediction_cutoff=cutoff)
     medians, mads = fit_robust_baseline(snapshots)
@@ -194,8 +380,17 @@ def run_risk(args: argparse.Namespace) -> int:
         prediction_cutoff=cutoff,
         medians=medians,
         mads=mads,
+        limitations=["Evaluation-cohort records have no operational asset identity."],
     )
-    print({"risk_records": len(records)})
+    if getattr(args, "persist", False):
+        session = next(get_db())
+        try:
+            _persist_operational_risk(session, records)
+        finally:
+            session.close()
+        print(f"Persisted {len(records)} evaluation risk records.")
+    else:
+        print({"risk_records": len(records)})
     return 0
 
 
@@ -252,10 +447,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_anomaly.add_argument("--top-n", type=int, default=10)
     p_anomaly.set_defaults(func=run_anomaly)
 
-    p_risk = subparsers.add_parser("risk", help="Build operational risk prioritization records.")
+    p_risk = subparsers.add_parser("risk", help="Build risk records for the independent evaluation cohort.")
     p_risk.add_argument("--output", default="data/evaluation")
     p_risk.add_argument("--observation-days", type=int, default=365)
+    p_risk.add_argument("--persist", action="store_true", help="Persist risk records to the database.")
     p_risk.set_defaults(func=run_risk)
+
+    p_operational_risk = subparsers.add_parser(
+        "operational-risk",
+        help="Score operational assets with the persisted model and persist the risk workspace.",
+    )
+    p_operational_risk.add_argument("--model", default="logistic_regression")
+    p_operational_risk.add_argument("--persist", action="store_true", help="Write risk records to PostgreSQL.")
+    p_operational_risk.set_defaults(func=run_operational_risk)
 
     p_list_decisions = subparsers.add_parser("list-pending-decisions", help="List pending engineering decisions.")
     p_list_decisions.set_defaults(func=run_list_pending_decisions)
@@ -268,12 +472,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_history.add_argument("decision_id")
     p_history.set_defaults(func=run_show_decision_history)
 
-    return parser
+    p_gen_docs = subparsers.add_parser("generate-knowledge-documents", help="Generate the synthetic engineering document corpus.")
     p_gen_docs.add_argument("--output", default="data/knowledge_base/source_documents")
     p_gen_docs.set_defaults(func=run_generate_knowledge)
 
     p_ingest = subparsers.add_parser("ingest-knowledge-documents", help="Ingest synthetic engineering documents.")
     p_ingest.add_argument("--source-dir", default="data/knowledge_base/source_documents")
+    p_ingest.add_argument("--force", action="store_true", help="Re-parse and rebuild unchanged documents.")
     p_ingest.set_defaults(func=run_ingest_knowledge)
 
     p_search = subparsers.add_parser("search-knowledge", help="Search engineering evidence.")
@@ -286,6 +491,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--asset-id", default=None)
     p_ask.add_argument("--top-k", type=int, default=5)
     p_ask.set_defaults(func=run_ask_knowledge)
+
+    p_init = subparsers.add_parser("initialize-demo", help="Prepare the application for demonstration.")
+    p_init.add_argument("--output", default="data/evaluation")
+    p_init.add_argument("--seed", type=int, default=20261122)
+    p_init.add_argument("--asset-count", type=int, default=1500)
+    p_init.add_argument("--observation-days", type=int, default=365)
+    p_init.add_argument("--horizon-days", type=int, default=90)
+    p_init.add_argument("--failure-prevalence", type=float, default=0.12)
+    p_init.set_defaults(func=run_initialize_demo)
 
     return parser
 
@@ -306,10 +520,15 @@ def run_ingest_knowledge(args: argparse.Namespace) -> int:
     from backend.app.database import get_db
 
     session = next(get_db())
-    repository = SQLAlchemyKnowledgeRepository(session)
-    provider = MockEmbeddingProvider()
-    result = ingest_directory(Path(args.source_dir), repository, provider)
-    session.commit()
+    try:
+        repository = SQLAlchemyKnowledgeRepository(session)
+        provider = MockEmbeddingProvider()
+        result = ingest_directory(
+            Path(args.source_dir), repository, provider, force=getattr(args, "force", False)
+        )
+        session.commit()
+    finally:
+        session.close()
     print(result)
     return 0
 
@@ -381,6 +600,72 @@ def run_show_decision_history(args: argparse.Namespace) -> int:
     session = next(get_db())
     events = get_history(session, UUID(args.decision_id))
     print([{"action": e.action, "new_status": e.new_status} for e in events])
+    return 0
+
+
+def run_initialize_demo(args: argparse.Namespace) -> int:
+    from backend.app.database import get_db
+    from backend.app.models import RiskRecord as RiskRecordModel
+
+    params, directory, cutoff, horizon_end = _evaluation_context(args)
+    # 1. Verify DB connectivity
+    session = next(get_db())
+    from sqlalchemy import text
+
+    session.execute(text("SELECT 1"))
+    print("DB OK")
+    # 2. Generate eval data
+    manifest = generate_independent_evaluation(directory, params=params)
+    print("Eval data generated:", manifest["counts"])
+    # 3. Train model
+    failures = []
+    for row in load_rows(directory / "failures.csv"):
+        mapped = dict(row)
+        mapped["asset_id"] = mapped.get("asset_ref") or ""
+        failures.append(failure_from_mapping(mapped))
+    snapshots = build_independent_feature_snapshots(directory, prediction_cutoff=cutoff)
+    failed_ids = {f.asset_id for f in failures}
+    confirmed = confirmed_healthy_until_for_snapshots(snapshots, cutoff, params.observation_days, horizon_end, failed_ids)
+    decisions = classify_outcomes(failures, [str(s.get("asset_id")) for s in snapshots], cutoff, horizon_end, confirmed_healthy_until=confirmed)
+    dataset = build_modeling_dataset(snapshots, decisions)
+    trained = train_baseline(dataset, "logistic_regression", seed=args.seed)
+    from ml.artifacts.registry import save_model
+
+    save_model(trained, Path("ml/artifacts/models"))
+    print("Model trained; metrics:", trained.metrics)
+    # 4. Generate operational risk records with the trained model (persisted)
+    import types
+
+    print("Building operational risk workspace ...")
+    result_code = run_operational_risk(
+        types.SimpleNamespace(model="logistic_regression", persist=True)
+    )
+    if result_code != 0:
+        print("Operational risk generation failed with code", result_code)
+    # 5. Generate + ingest knowledge docs
+    from rag.documents import generate_corpus
+    from rag.embeddings import MockEmbeddingProvider
+    from rag.ingestion import ingest_directory
+    from rag.repository import SQLAlchemyKnowledgeRepository
+
+    source_dir = Path("data/knowledge_base/source_documents")
+    generate_corpus(source_dir)
+    repo = SQLAlchemyKnowledgeRepository(session)
+    provider = MockEmbeddingProvider()
+    result = ingest_directory(source_dir, repo, provider, force=True)
+    session.commit()
+    print("Knowledge ingestion:", result)
+    # 6. Seed a demo decision
+    from decisions.service import create_decision
+
+    try:
+        create_decision(session, asset_id="T-00001", asset_type="transformers", reviewer="demo-reviewer", reason="Demo seed decision")
+        session.commit()
+        print("Seeded demo decision.")
+    except Exception as exc:
+        session.rollback()
+        print("Decision seed skipped:", exc)
+    print("Demo initialization complete.")
     return 0
 
 

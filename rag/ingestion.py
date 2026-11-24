@@ -8,6 +8,7 @@ from pathlib import Path
 from rag.chunking import chunk_text
 from rag.embeddings import EmbeddingProvider
 from rag.extraction import extract_text
+from rag.metadata import parse_document_metadata
 from rag.repository import DocumentChunkRecord, InMemoryKnowledgeRepository, KnowledgeDocumentRecord, KnowledgeRepository
 
 
@@ -20,8 +21,14 @@ def ingest_directory(
     provider: EmbeddingProvider,
     *,
     max_file_size_bytes: int = 10 * 1024 * 1024,
+    force: bool = False,
 ) -> dict:
-    """Ingest all supported documents in ``source_dir`` into the repository."""
+    """Ingest all supported documents in ``source_dir`` into the repository.
+
+    Unchanged checksums are skipped unless ``force`` is true.  Forced ingestion
+    re-parses document metadata and rebuilds chunks for the existing document;
+    it does not delete documents that are absent from ``source_dir``.
+    """
     run = repository.create_ingestion_run()
     documents_processed = 0
     chunks_created = 0
@@ -37,14 +44,15 @@ def ingest_directory(
                 raise ValueError(f"empty file: {path.name}")
             checksum = _sha256(path)
             existing = repository.get_document(path.name)
-            if existing is not None and existing.checksum == checksum:
+            if existing is not None and existing.checksum == checksum and not force:
                 continue
             text, pages = extract_text(path)
             if not text.strip():
                 raise ValueError(f"no text extracted: {path.name}")
-            title = path.stem
-            category = "Engineering"
-            revision = "Rev A"
+            parsed = parse_document_metadata(text, path.stem)
+            title = str(parsed["title"])
+            category = str(parsed["category"])
+            revision = str(parsed["revision"])
             mime_type = _mime_type(path.suffix.lower())
             document = KnowledgeDocumentRecord(
                 document_id=path.name,
@@ -54,8 +62,12 @@ def ingest_directory(
                 title=title,
                 category=category,
                 revision=revision,
-                publication_date=None,
-                equipment_applicability=None,
+                publication_date=(
+                    None if parsed["publication_date"] is None else str(parsed["publication_date"])
+                ),
+                equipment_applicability=(
+                    None if parsed["equipment_applicability"] is None else str(parsed["equipment_applicability"])
+                ),
                 extracted_text=text,
                 status="ingested",
             )
@@ -86,6 +98,7 @@ def ingest_directory(
                         "category": chunk.category,
                         "revision": chunk.revision,
                         "page_number": chunk.page_number,
+                        "equipment": document.equipment_applicability,
                     },
                 )
                 for index, chunk in enumerate(chunks)
