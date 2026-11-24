@@ -40,3 +40,6 @@ data/reports/
 # Local runtime and generated build metadata
 .run/
 *.tsbuildinfo
+
+# Demo recordings are hosted separately
+docs/Demo-Video/*.mp4
